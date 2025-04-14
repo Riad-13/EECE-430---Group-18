@@ -1,0 +1,148 @@
+{% extends "base.html" %} {% block title %}Chat{% endblock %} {% block content
+%}
+<div class="container mt-4">
+  <div class="row">
+    <div class="col-md-4">
+      {% if user.role == 'receptionist' %}
+      <div class="card shadow mb-3">
+        <div class="card-header bg-primary text-white py-3">
+          <h5 class="card-title mb-0">
+            <i class="bi bi-people me-2"></i>Patients
+          </h5>
+        </div>
+        <div class="list-group list-group-flush">
+          {% for patient in patients %}
+          <a
+            href="{{ url_for('chat', patient_id=patient.id) }}"
+            class="list-group-item list-group-item-action {% if request.args.get('patient_id')|default('')|int == patient.id %}active{% endif %}"
+          >
+            <div class="d-flex w-100 justify-content-between">
+              <h6 class="mb-1">{{ patient.name }}</h6>
+              <small class="text-muted">{{ patient.email }}</small>
+            </div>
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="col-md-8">
+      <div class="card shadow">
+        <div class="card-header bg-primary text-white py-3">
+          <h5 class="card-title mb-0">
+            {% if user.role == 'receptionist' %} {% if
+            request.args.get('patient_id') %}
+            <i class="bi bi-chat-dots me-2"></i>Chat with {{
+            patients|selectattr('id', 'equalto',
+            request.args.get('patient_id')|int)|map(attribute='name')|first }}
+            {% else %} <i class="bi bi-chat-dots me-2"></i>Select a patient to
+            chat {% endif %} {% else %} <i class="bi bi-chat-dots me-2"></i>Chat
+            with Receptionist {% endif %}
+          </h5>
+        </div>
+
+        <div
+          class="card-body chat-box p-3"
+          style="height: 400px; overflow-y: auto"
+        >
+          {% if conversation %} {% for msg in conversation %}
+          <div
+            class="message {% if msg.sender_id == user.id %}sent{% else %}received{% endif %} mb-3"
+          >
+            <div
+              class="message-content p-2 rounded {% if msg.sender_id == user.id %}bg-primary text-white{% else %}bg-light{% endif %}"
+              style="max-width: 75%; {% if msg.sender_id == user.id %}margin-left: auto;{% endif %}"
+            >
+              {{ msg.content }}
+            </div>
+            <small
+              class="text-muted d-block {% if msg.sender_id == user.id %}text-end{% endif %}"
+            >
+              {{ msg.timestamp.strftime('%Y-%m-%d %H:%M') }}
+            </small>
+          </div>
+          {% endfor %} {% else %}
+          <div class="text-center text-muted mt-5">
+            {% if user.role == 'receptionist' and not
+            request.args.get('patient_id') %}
+            <p>Select a patient from the list to start chatting</p>
+            {% else %}
+            <p>No messages yet. Start the conversation!</p>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="card-footer">
+          <form method="POST" class="d-flex gap-2">
+            {% if user.role == 'receptionist' %} {% if not
+            request.args.get('patient_id') %}
+            <select name="patient_id" class="form-select" required>
+              <option value="">Select patient...</option>
+              {% for patient in patients %}
+              <option value="{{ patient.id }}">{{ patient.name }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <input
+              type="hidden"
+              name="patient_id"
+              value="{{ request.args.get('patient_id') }}"
+            />
+            {% endif %} {% endif %}
+            <input
+              type="text"
+              name="content"
+              class="form-control"
+              placeholder="Type your message..."
+              required
+            />
+            <button type="submit" class="btn btn-primary">
+              <i class="bi bi-send me-1"></i>Send
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .chat-box {
+    background-color: #f8f9fa;
+  }
+
+  .message-content {
+    word-wrap: break-word;
+  }
+
+  .message.sent .message-content {
+    background-color: #007bff;
+    color: white;
+    border-radius: 15px 15px 0 15px;
+  }
+
+  .message.received .message-content {
+    background-color: #e9ecef;
+    border-radius: 15px 15px 15px 0;
+  }
+
+  .list-group-item.active {
+    background-color: #007bff;
+    border-color: #007bff;
+  }
+
+  .list-group-item:hover:not(.active) {
+    background-color: #f8f9fa;
+  }
+</style>
+
+<script>
+  // Auto-scroll to bottom of chat
+  document.addEventListener("DOMContentLoaded", function () {
+    const chatBox = document.querySelector(".chat-box");
+    chatBox.scrollTop = chatBox.scrollHeight;
+  });
+</script>
+{% endblock %}
