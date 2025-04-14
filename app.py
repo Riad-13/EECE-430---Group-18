@@ -514,6 +514,100 @@ def mark_paid(appointment_id):
     flash("Payment recorded successfully.", "success")
     return redirect(url_for("billing"))
 
+
+###############################################################################
+#                                CHAT ROUTES                                  #
+###############################################################################
+@app.route("/chat", methods=["GET", "POST"])
+def chat():
+    """
+    Simple chat between a Receptionist and a Patient.
+    If you want real-time, you'd use websockets or similar,
+    but here we do a simple post-based system.
+    """
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    # Receptionist sees all messages, can choose patient to chat with.
+    # Patient sees only their conversation with the receptionist.
+    receptionist = User.query.filter_by(role="receptionist").first()
+    if not receptionist:
+        flash("No receptionist found in the system yet.", "warning")
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        content = request.form.get("content")
+        if not content:
+            flash("Message cannot be empty.", "danger")
+            return redirect(url_for("chat"))
+
+        if user.role == "patient":
+            msg = Message(
+                sender_id=user.id,
+                receiver_id=receptionist.id,
+                content=content
+            )
+            db.session.add(msg)
+            db.session.commit()
+            flash("Message sent to Receptionist.", "success")
+            return redirect(url_for("chat"))
+
+        elif user.role == "receptionist":
+            patient_id = request.form.get("patient_id")
+            if not patient_id:
+                flash("Select a patient to send message to.", "danger")
+                return redirect(url_for("chat"))
+                
+            # Check if patient exists
+            patient = User.query.get(patient_id)
+            if not patient or patient.role != "patient":
+                flash("Invalid patient selected.", "danger")
+                return redirect(url_for("chat"))
+                
+            msg = Message(
+                sender_id=user.id,
+                receiver_id=int(patient_id),
+                content=content
+            )
+            db.session.add(msg)
+            db.session.commit()
+            flash("Message sent to Patient.", "success")
+            return redirect(url_for("chat", patient_id=patient_id))
+
+    # GET request
+    if user.role == "patient":
+        # Show messages between this patient and receptionist
+        conversation = Message.query.filter(
+            ((Message.sender_id == user.id) & (Message.receiver_id == receptionist.id)) |
+            ((Message.sender_id == receptionist.id) & (Message.receiver_id == user.id))
+        ).order_by(Message.timestamp.asc()).all()
+        return render_template("chat.html", user=user, conversation=conversation, patients=None)
+
+    elif user.role == "receptionist":
+        # Show all messages, or let receptionist choose which patient's conversation to view
+        patients = User.query.filter_by(role="patient").all()
+        selected_patient_id = request.args.get("patient_id")
+        conversation = []
+        
+        if selected_patient_id:
+            try:
+                selected_patient_id = int(selected_patient_id)
+                # Show conversation with that specific patient
+                conversation = Message.query.filter(
+                    ((Message.sender_id == selected_patient_id) & (Message.receiver_id == user.id)) |
+                    ((Message.sender_id == user.id) & (Message.receiver_id == selected_patient_id))
+                ).order_by(Message.timestamp.asc()).all()
+            except ValueError:
+                flash("Invalid patient ID.", "danger")
+                return redirect(url_for("chat"))
+                
+        return render_template("chat.html", user=user, conversation=conversation, patients=patients)
+
+    else:
+        flash("Chat is only for Receptionists and Patients.", "warning")
+        return redirect(url_for("dashboard"))
+        
 ###############################################################################
 #                                MAIN EXECUTION                               #
 ###############################################################################
