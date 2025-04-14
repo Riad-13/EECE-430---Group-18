@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Patient Dashboard{% endblock %}
+{% block content %}
+<div class="text-center">
+  <h2>{{ user.name }}’s Dashboard</h2>
+  <div class="list-group mt-4">
+    <a href="{{ url_for('appointments') }}" class="list-group-item list-group-item-action">My Appointments</a>
+    <a href="{{ url_for('schedule_appointment') }}" class="list-group-item list-group-item-action">Schedule New Appointment</a>
+    <a href="{{ url_for('chat') }}" class="list-group-item list-group-item-action">Chat with Receptionist</a>
+  </div>
+</div>
+{% endblock %}
