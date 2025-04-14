@@ -223,6 +223,296 @@ def logout():
     return redirect(url_for("index"))
 
 
+###############################################################################
+#                               DASHBOARD VIEWS                               #
+###############################################################################
+
+@app.route("/dashboard")
+def dashboard():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    if user.role == "doctor":
+        return render_template("dashboard_doctor.html", user=user)
+    elif user.role == "patient":
+        return render_template("dashboard_patient.html", user=user)
+    elif user.role == "receptionist":
+        return render_template("dashboard_receptionist.html", user=user)
+    else:
+        flash("Unknown role.", "danger")
+        return redirect(url_for("logout"))
+
+###############################################################################
+#                            APPOINTMENT ROUTES                               #
+###############################################################################
+
+@app.route("/appointments", methods=["GET"])
+def appointments():
+    """List all appointments relevant to the current user."""
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+    
+    # If doctor -> show all for that doctor
+    # If patient -> show all for that patient
+    # If receptionist -> show all appointments across the board
+    if user.role == "doctor":
+        my_appointments = Appointment.query.filter_by(doctor_id=user.id).all()
+    elif user.role == "patient":
+        my_appointments = Appointment.query.filter_by(patient_id=user.id).all()
+    else:  # receptionist
+        my_appointments = Appointment.query.all()
+
+    return render_template("appointments.html", appointments=my_appointments, user=user)
+
+@app.route("/schedule_appointment", methods=["GET", "POST"])
+def schedule_appointment():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+    
+    if user.role not in ["patient", "receptionist"]:
+        flash("Access denied.", "danger")
+        return redirect(url_for("dashboard"))
+
+    doctors = User.query.filter_by(role="doctor").all()
+    patients = User.query.filter_by(role="patient").all() if user.role == "receptionist" else None
+
+    if request.method == "POST":
+        doctor_id = request.form.get("doctor_id")
+        date = request.form.get("date")
+        time = request.form.get("time")
+        duration = request.form.get("duration", 60)  # Default 60 minutes
+        notes = request.form.get("notes", "")
+
+        if not all([doctor_id, date, time]):
+            flash("All fields are required.", "danger")
+            return redirect(url_for("schedule_appointment"))
+
+        patient_id = user.id if user.role == "patient" else request.form.get("patient_id")
+        if not patient_id:
+            flash("Patient selection is required.", "danger")
+            return redirect(url_for("schedule_appointment"))
+
+        # Create temporary appointment object to check availability
+        temp_appointment = Appointment(
+            doctor_id=doctor_id,
+            patient_id=patient_id,
+            date=date,
+            time=time,
+            duration=int(duration)
+        )
+        
+        is_available, message = temp_appointment.is_time_available()
+        if not is_available:
+            flash(message, "danger")
+            return redirect(url_for("schedule_appointment"))
+
+        appointment = Appointment(
+            doctor_id=doctor_id,
+            patient_id=patient_id,
+            date=date,
+            time=time,
+            duration=int(duration),
+            notes=notes,
+            status="Scheduled"
+        )
+        db.session.add(appointment)
+        db.session.commit()
+        flash("Appointment scheduled successfully!", "success")
+        return redirect(url_for("appointments"))
+
+    return render_template("schedule_appointment.html", doctors=doctors, patients=patients, user=user)
+
+@app.route("/cancel_appointment/<int:appointment_id>", methods=["POST"])
+def cancel_appointment(appointment_id):
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    appointment = Appointment.query.get_or_404(appointment_id)
+
+    # Check if user is authorized to cancel 
+    # (patient who booked it, the doctor, or the receptionist)
+    if user.role == "patient" and appointment.patient_id != user.id:
+        flash("Unauthorized to cancel this appointment.", "danger")
+        return redirect(url_for("appointments"))
+    # Doctors can also cancel their appointments
+    if user.role == "doctor" and appointment.doctor_id != user.id:
+        flash("Unauthorized to cancel this appointment.", "danger")
+        return redirect(url_for("appointments"))
+    # Receptionist can cancel any appointment
+
+    appointment.status = "Canceled"
+    db.session.commit()
+    flash("Appointment canceled.", "info")
+    return redirect(url_for("appointments"))
+
+@app.route("/reschedule_appointment/<int:appointment_id>", methods=["GET", "POST"])
+def reschedule_appointment(appointment_id):
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+
+    appointment = Appointment.query.get_or_404(appointment_id)
+
+    # Check if user is authorized to reschedule 
+    if user.role == "patient" and appointment.patient_id != user.id:
+        flash("Unauthorized to reschedule this appointment.", "danger")
+        return redirect(url_for("appointments"))
+    if user.role == "doctor" and appointment.doctor_id != user.id:
+        flash("Unauthorized to reschedule this appointment.", "danger")
+        return redirect(url_for("appointments"))
+
+    if request.method == "POST":
+        new_date = request.form.get("date")
+        new_time = request.form.get("time")
+        duration = request.form.get("duration", appointment.duration)
+        notes = request.form.get("notes", "")
+
+        # Create temporary appointment object to check availability
+        temp_appointment = Appointment(
+            doctor_id=appointment.doctor_id,
+            patient_id=appointment.patient_id,
+            date=new_date,
+            time=new_time,
+            duration=int(duration)
+        )
+        
+        is_available, message = temp_appointment.is_time_available()
+        if not is_available:
+            flash(message, "danger")
+            return redirect(url_for("reschedule_appointment", appointment_id=appointment_id))
+
+        appointment.date = new_date
+        appointment.time = new_time
+        appointment.duration = int(duration)
+        appointment.notes = notes
+        appointment.status = "Rescheduled"
+        db.session.commit()
+        flash("Appointment rescheduled successfully.", "success")
+        return redirect(url_for("appointments"))
+
+    doctors = [User.query.get(appointment.doctor_id)]
+    patients = [User.query.get(appointment.patient_id)] if user.role == "receptionist" else None
+    
+    return render_template("schedule_appointment.html", 
+                         appointment=appointment, 
+                         user=user, 
+                         doctors=doctors,
+                         patients=patients)
+
+@app.route("/manage_availability", methods=["GET", "POST"])
+def manage_availability():
+    user = get_current_user()
+    if not user or user.role != "doctor":
+        flash("Access denied.", "danger")
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        day = request.form.get("day")
+        start_time = request.form.get("start_time")
+        end_time = request.form.get("end_time")
+        is_available = request.form.get("is_available") == "true"
+
+        availability = DoctorAvailability.query.filter_by(
+            doctor_id=user.id,
+            day_of_week=day
+        ).first()
+
+        if availability:
+            availability.start_time = start_time
+            availability.end_time = end_time
+            availability.is_available = is_available
+        else:
+            availability = DoctorAvailability(
+                doctor_id=user.id,
+                day_of_week=day,
+                start_time=start_time,
+                end_time=end_time,
+                is_available=is_available
+            )
+            db.session.add(availability)
+
+        db.session.commit()
+        flash("Availability updated successfully.", "success")
+        return redirect(url_for("manage_availability"))
+
+    availability = DoctorAvailability.query.filter_by(doctor_id=user.id).all()
+    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    
+    return render_template("manage_availability.html", 
+                         availability=availability,
+                         days=days,
+                         user=user)
+
+@app.route("/manage_rate", methods=["GET", "POST"])
+def manage_rate():
+    user = get_current_user()
+    if not user or user.role != "doctor":
+        flash("Access denied.", "danger")
+        return redirect(url_for("dashboard"))
+
+    if request.method == "POST":
+        rate_per_hour = request.form.get("rate_per_hour")
+        
+        if not rate_per_hour or float(rate_per_hour) <= 0:
+            flash("Please enter a valid rate.", "danger")
+            return redirect(url_for("manage_rate"))
+            
+        doctor_rate = DoctorRate.query.filter_by(doctor_id=user.id).first()
+        
+        if doctor_rate:
+            doctor_rate.rate_per_hour = float(rate_per_hour)
+        else:
+            doctor_rate = DoctorRate(
+                doctor_id=user.id,
+                rate_per_hour=float(rate_per_hour)
+            )
+            db.session.add(doctor_rate)
+            
+        db.session.commit()
+        flash("Rate updated successfully.", "success")
+        return redirect(url_for("manage_rate"))
+        
+    doctor_rate = DoctorRate.query.filter_by(doctor_id=user.id).first()
+    return render_template("manage_rate.html", user=user, doctor_rate=doctor_rate)
+
+@app.route("/billing", methods=["GET"])
+def billing():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login"))
+        
+    if user.role == "patient":
+        appointments = Appointment.query.filter_by(patient_id=user.id).all()
+    elif user.role == "doctor":
+        appointments = Appointment.query.filter_by(doctor_id=user.id).all()
+    else:  # receptionist
+        appointments = Appointment.query.all()
+        
+    return render_template("billing.html", appointments=appointments, user=user)
+
+@app.route("/mark_paid/<int:appointment_id>", methods=["POST"])
+def mark_paid(appointment_id):
+    user = get_current_user()
+    if not user or user.role not in ["doctor", "receptionist"]:
+        flash("Access denied.", "danger")
+        return redirect(url_for("dashboard"))
+        
+    appointment = Appointment.query.get_or_404(appointment_id)
+    
+    if user.role == "doctor" and appointment.doctor_id != user.id:
+        flash("Unauthorized to mark this appointment as paid.", "danger")
+        return redirect(url_for("billing"))
+        
+    appointment.is_paid = True
+    appointment.payment_date = datetime.utcnow()
+    db.session.commit()
+    
+    flash("Payment recorded successfully.", "success")
+    return redirect(url_for("billing"))
 
 ###############################################################################
 #                                MAIN EXECUTION                               #
