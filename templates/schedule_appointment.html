@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ appointment and 'Reschedule' or 'Schedule' }} Appointment{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">
+          <h5 class="card-title mb-0">{{ appointment and 'Reschedule' or 'Schedule' }} Appointment</h5>
+        </div>
+        <div class="card-body">
+          <form method="POST" class="needs-validation" novalidate>
+            {% if not appointment %}
+            <div class="mb-3">
+              <label class="form-label">Doctor</label>
+              <select name="doctor_id" class="form-select" required>
+                <option value="">Select a doctor...</option>
+                {% for d in doctors %}
+                  <option value="{{ d.id }}" {% if appointment and appointment.doctor_id==d.id %}selected{% endif %}>
+                    Dr. {{ d.name }}
+                  </option>
+                {% endfor %}
+              </select>
+              <div class="invalid-feedback">Please select a doctor.</div>
+            </div>
+            {% endif %}
+
+            {% if user.role=='receptionist' and not appointment %}
+            <div class="mb-3">
+              <label class="form-label">Patient</label>
+              <select name="patient_id" class="form-select" required>
+                <option value="">Select a patient...</option>
+                {% for p in patients %}
+                  <option value="{{ p.id }}" {% if appointment and appointment.patient_id==p.id %}selected{% endif %}>
+                    {{ p.name }}
+                  </option>
+                {% endfor %}
+              </select>
+              <div class="invalid-feedback">Please select a patient.</div>
+            </div>
+            {% endif %}
+
+            <div class="mb-3">
+              <label class="form-label">Date</label>
+              <input name="date" type="date" class="form-control" 
+                     value="{{ appointment and appointment.date }}" 
+                     min="{{ now().strftime('%Y-%m-%d') }}"
+                     required>
+              <div class="invalid-feedback">Please select a valid date.</div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Time</label>
+              <input name="time" type="time" class="form-control" 
+                     value="{{ appointment and appointment.time }}" 
+                     required>
+              <div class="invalid-feedback">Please select a valid time.</div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Notes (Optional)</label>
+              <textarea name="notes" class="form-control" rows="3" 
+                        placeholder="Add any additional notes or requirements">{{ appointment and appointment.notes or '' }}</textarea>
+            </div>
+
+            <div class="d-grid gap-2">
+              <button type="submit" class="btn btn-primary">
+                {{ appointment and 'Reschedule' or 'Schedule' }} Appointment
+              </button>
+              <a href="{{ url_for('appointments') }}" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Form validation
+(function () {
+  'use strict'
+  var forms = document.querySelectorAll('.needs-validation')
+  Array.prototype.slice.call(forms).forEach(function (form) {
+    form.addEventListener('submit', function (event) {
+      if (!form.checkValidity()) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+      form.classList.add('was-validated')
+    }, false)
+  })
+})()
+
+// Set minimum date to today
+document.addEventListener('DOMContentLoaded', function() {
+  const dateInput = document.querySelector('input[type="date"]');
+  if (dateInput) {
+    const today = new Date().toISOString().split('T')[0];
+    dateInput.min = today;
+  }
+});
+</script>
+{% endblock %}
